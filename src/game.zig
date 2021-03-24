@@ -6,6 +6,7 @@ const Writer = std.fs.File.Writer;
 const Reader = std.fs.File.Reader;
 const util = @import("util.zig");
 const allEqual = util.allEqual;
+const any = util.any;
 
 const Symbol = extern enum { Empty, X, O };
 const Message = extern enum { None, Input_Too_Long, Invalid_Number, Invalid_Choice, Spot_Already_Occupied };
@@ -67,11 +68,11 @@ fn viewState(game: Game, writer: Writer) !void {
     } else if (state == State.O_Turn) {
         try writer.print("O, it's your turn.\n", .{});
     } else if (state == State.X_Win) {
-        try writer.print("X wins!\n", .{});
+        try writer.print("The game's over. X wins!\n", .{});
     } else if (state == State.O_Win) {
-        try writer.print("O wins!\n", .{});
+        try writer.print("The game's over. O wins!\n", .{});
     } else if (state == State.Tie) {
-        try writer.print("It'sa tie!\n", .{});
+        try writer.print("The game's over. It's a tie!\n", .{});
     }
 }
 
@@ -111,17 +112,6 @@ test "complete" {
     assert(complete(tie_game) == true);
 }
 
-const checks: [8][3]u8 = [8][3]u8{
-    [3]u8{ 0, 1, 2 },
-    [3]u8{ 3, 4, 5 },
-    [3]u8{ 6, 7, 8 },
-    [3]u8{ 0, 3, 6 },
-    [3]u8{ 1, 4, 7 },
-    [3]u8{ 2, 5, 8 },
-    [3]u8{ 0, 4, 8 },
-    [3]u8{ 2, 4, 6 },
-};
-
 pub fn update(game: Game, reader: Reader) !Game {
     var g = copy(game);
 
@@ -155,29 +145,56 @@ pub fn update(game: Game, reader: Reader) !Game {
         g.board[guess] = Symbol.O;
     }
 
-    const state: State = ret: {
-        for (checks) |check| {
-            const items = [3]Symbol{ g.board[check[0]], g.board[check[1]], g.board[check[2]] };
-            if (items[0] != Symbol.Empty and allEqual(Symbol, items[0..])) {
-                if (items[0] == Symbol.O) {
-                    break :ret State.O_Win;
-                } else if (items[0] == Symbol.X) {
-                    break :ret State.X_Win;
-                }
-            }
-        }
-        // Switch turns
-        if (game.state == State.X_Turn) {
-            break :ret State.O_Turn;
-        } else if (game.state == State.O_Turn) {
-            break :ret State.X_Turn;
-        }
-
-        break :ret game.state;
-    };
+    const state = nextState(g);
 
     g.state = state;
     g.message = Message.None;
 
     return g;
+}
+
+const checks: [8][3]u8 = [8][3]u8{
+    [3]u8{ 0, 1, 2 },
+    [3]u8{ 3, 4, 5 },
+    [3]u8{ 6, 7, 8 },
+    [3]u8{ 0, 3, 6 },
+    [3]u8{ 1, 4, 7 },
+    [3]u8{ 2, 5, 8 },
+    [3]u8{ 0, 4, 8 },
+    [3]u8{ 2, 4, 6 },
+};
+
+fn nextState(game: Game) State {
+    const board = game.board;
+    // check for wins
+    for (checks) |check| {
+        const items = [3]Symbol{ board[check[0]], board[check[1]], board[check[2]] };
+        if (items[0] != Symbol.Empty and allEqual(Symbol, items[0..])) {
+            if (items[0] == Symbol.O) {
+                return State.O_Win;
+            } else if (items[0] == Symbol.X) {
+                return State.X_Win;
+            }
+        }
+    }
+
+    // check for tie
+    if (!any(Symbol, Symbol.Empty, board[0..])) {
+        return State.Tie;
+    }
+
+    // Switch turns
+    if (game.state == State.X_Turn) {
+        return State.O_Turn;
+    } else if (game.state == State.O_Turn) {
+        return State.X_Turn;
+    }
+
+    return game.state;
+}
+
+test "nextState" {
+    const x_turn_game = Game{ .state = State.X_Turn };
+
+    assert(nextState(x_turn_game) == State.O_Turn);
 }
