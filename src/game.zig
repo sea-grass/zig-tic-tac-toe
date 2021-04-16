@@ -6,153 +6,116 @@ const assert = debug.assert;
 const assertEqual = debug.assertEqual;
 const Writer = std.fs.File.Writer;
 const Reader = std.fs.File.Reader;
+
 const util = @import("util.zig");
 const allEqual = util.allEqual;
 const any = util.any;
 
-const Symbol = extern enum { Empty, X, O };
-const Message = extern enum { None, Input_Too_Long, Invalid_Number, Invalid_Choice, Spot_Already_Occupied };
-const Game = extern struct { id: u8 = 0, state: State = State.X_Turn, board: [9]Symbol = [_]Symbol{Symbol.Empty} ** 9, message: Message = Message.None };
-const State = extern enum { X_Turn, O_Turn, X_Win, O_Win, Tie };
+pub const Command = union(enum) { unknown, quit, play: u8 };
+pub const GameError = error{
+    InputError,
+    ViewError,
+};
+const State = enum { x_turn, o_turn, x_win, o_win, tie, quit };
+const Symbol = enum { empty, x, o };
+const Message = enum { none, input_too_long, invalid_number, invalid_choice, spot_already_occupied, unknown_input_error };
 
-pub fn create() Game {
-    return Game{ .id = 1 };
-}
+pub const Adapter = struct {
+    viewFn: fn (a: *Adapter, g: Game) GameError!void,
+    getCommandFn: fn (a: *Adapter) GameError!Command,
 
-pub fn copy(game: Game) Game {
-    return Game{ .id = game.id, .state = game.state, .board = game.board, .message = game.message };
-}
-
-test "copy" {
-    const initial = Game{ .id = 9, .state = State.X_Win, .message = Message.None };
-    const duplicate = copy(initial);
-
-    assert(initial.id == duplicate.id);
-    assert(initial.state == duplicate.state);
-}
-
-pub fn view(game: Game, writer: Writer) !void {
-    try writer.print("Tic Tac Toe\n===========\n", .{});
-    try viewBoard(game, writer);
-    try viewState(game, writer);
-    try viewMessage(game, writer);
-}
-
-fn viewBoard(game: Game, writer: Writer) !void {
-    const game_board = game.board;
-
-    for (game_board) |square, i| {
-        if (i % 3 == 0) {
-            try writer.print("-------------\n", .{});
-        }
-        try writer.print("|", .{});
-
-        if (square == Symbol.Empty) {
-            try writer.print(" {} ", .{i});
-        } else if (square == Symbol.X) {
-            try writer.print(" X ", .{});
-        } else if (square == Symbol.O) {
-            try writer.print(" O ", .{});
-        }
-
-        if (i % 3 == 2) {
-            try writer.print("|\n", .{});
-        }
+    pub fn view(self: *Adapter, game: Game) !void {
+        try self.viewFn(self, game);
     }
-    // print bottom border
-    try writer.print("-------------\n", .{});
-}
 
-fn viewState(game: Game, writer: Writer) !void {
-    const state = game.state;
-    if (state == State.X_Turn) {
-        try writer.print("X, it's your turn.\n", .{});
-    } else if (state == State.O_Turn) {
-        try writer.print("O, it's your turn.\n", .{});
-    } else if (state == State.X_Win) {
-        try writer.print("The game's over. X wins!\n", .{});
-    } else if (state == State.O_Win) {
-        try writer.print("The game's over. O wins!\n", .{});
-    } else if (state == State.Tie) {
-        try writer.print("The game's over. It's a tie!\n", .{});
+    pub fn getCommand(self: *Adapter) !Command {
+        const command = try self.getCommandFn(self);
+        return command;
     }
-}
+};
 
-fn viewMessage(game: Game, writer: Writer) !void {
-    const message = game.message;
-    if (message == Message.Input_Too_Long) {
-        try writer.print("! Input too long. Please try again.\n", .{});
-    } else if (message == Message.Invalid_Number) {
-        try writer.print("! Input was not a valid number. Please try again.\n", .{});
-    } else if (message == Message.Invalid_Choice) {
-        try writer.print("! Input was not a valid choice. Please try again.\n", .{});
-    } else if (message == Message.Spot_Already_Occupied) {
-        try writer.print("! The selected spot has already been occupied. Please try again.\n", .{});
+pub const Game = struct {
+    id: u8 = 0,
+    adapter: Adapter,
+    state: State = State.x_turn,
+    board: [9]Symbol = [_]Symbol{Symbol.empty} ** 9,
+    message: Message = Message.none,
+
+    pub fn init(a: Adapter) Game {
+        return Game{ .id = 1, .adapter = a };
     }
-}
 
-pub fn complete(game: Game) bool {
-    return switch (game.state) {
-        State.X_Win => true,
-        State.O_Win => true,
-        State.Tie => true,
-        else => false,
-    };
-}
+    pub fn view(self: *Game) !void {
+        try self.adapter.view(self.*);
+    }
+
+    pub fn update(self: *Game) !void {
+        const command = try self.adapter.getCommand();
+
+        switch (command) {
+            .play => |spot| {
+                if (spot > 8) {
+                    self.message = Message.invalid_choice;
+                    return;
+                }
+
+                switch (self.board[spot]) {
+                    .empty => switch (self.state) {
+                        .x_turn => {
+                            self.board[spot] = Symbol.x;
+                        },
+                        .o_turn => {
+                            self.board[spot] = Symbol.o;
+                        },
+                        else => {},
+                    },
+                    else => {
+                        self.message = Message.spot_already_occupied;
+                        return;
+                    },
+                }
+            },
+            .quit => {
+                self.state = State.quit;
+                return;
+            },
+            .unknown => {
+                self.message = Message.invalid_choice;
+                return;
+            },
+        }
+
+        const state = nextState(self.*);
+
+        self.state = state;
+        self.message = Message.none;
+    }
+
+    pub fn complete(self: Game) bool {
+        return switch (self.state) {
+            State.x_win => true,
+            State.o_win => true,
+            State.tie => true,
+            State.quit => true,
+            else => false,
+        };
+    }
+};
 
 test "complete" {
-    const x_turn_game = Game{ .state = State.X_Turn };
-    const o_turn_game = Game{ .state = State.O_Turn };
-    const x_win_game = Game{ .state = State.X_Win };
-    const o_win_game = Game{ .state = State.O_Win };
-    const tie_game = Game{ .state = State.Tie };
+    const x_turn_game = Game{ .state = State.x_turn };
+    const o_turn_game = Game{ .state = State.o_turn };
+    const x_win_game = Game{ .state = State.x_win };
+    const o_win_game = Game{ .state = State.o_win };
+    const tie_game = Game{ .state = State.tie };
+    const quit_game = Game{ .state = State.quit };
 
-    assert(complete(x_turn_game) == false);
-    assert(complete(o_turn_game) == false);
-    assert(complete(x_win_game) == true);
-    assert(complete(o_win_game) == true);
-    assert(complete(tie_game) == true);
-}
-
-pub fn update(game: Game, reader: Reader) !Game {
-    var g = copy(game);
-
-    var line_buf: [20]u8 = undefined;
-
-    const amt = try reader.read(&line_buf);
-    if (amt == line_buf.len) {
-        g.message = Message.Input_Too_Long;
-        return g;
-    }
-    const line = std.mem.trimRight(u8, line_buf[0..amt], "\r\n");
-
-    const guess = fmt.parseUnsigned(u8, line, 10) catch {
-        g.message = Message.Invalid_Number;
-        return g;
-    };
-
-    if (guess < 0 or guess > 8) {
-        g.message = Message.Invalid_Choice;
-        return g;
-    }
-
-    if (g.board[guess] != Symbol.Empty) {
-        g.message = Message.Spot_Already_Occupied;
-        return g;
-    }
-
-    if (g.state == State.X_Turn) {
-        g.board[guess] = Symbol.X;
-    } else if (g.state == State.O_Turn) {
-        g.board[guess] = Symbol.O;
-    }
-
-    const state = nextState(g);
-
-    g.state = state;
-    g.message = Message.None;
-
-    return g;
+    assert(!x_turn_game.complete());
+    assert(!o_turn_game.complete());
+    assert(x_win_game.complete());
+    assert(o_win_game.complete());
+    assert(tie_game.complete());
+    assert(quit_game.complete());
 }
 
 const checks: [8][3]u8 = [8][3]u8{
@@ -171,32 +134,32 @@ fn nextState(game: Game) State {
     // check for wins
     for (checks) |check| {
         const items = [3]Symbol{ board[check[0]], board[check[1]], board[check[2]] };
-        if (items[0] != Symbol.Empty and allEqual(Symbol, items[0..])) {
-            if (items[0] == Symbol.O) {
-                return State.O_Win;
-            } else if (items[0] == Symbol.X) {
-                return State.X_Win;
+        if (items[0] != Symbol.empty and allEqual(Symbol, items[0..])) {
+            if (items[0] == Symbol.o) {
+                return State.o_win;
+            } else if (items[0] == Symbol.x) {
+                return State.x_win;
             }
         }
     }
 
     // check for tie
-    if (!any(Symbol, Symbol.Empty, board[0..])) {
-        return State.Tie;
+    if (!any(Symbol, Symbol.empty, board[0..])) {
+        return State.tie;
     }
 
     // Switch turns
-    if (game.state == State.X_Turn) {
-        return State.O_Turn;
-    } else if (game.state == State.O_Turn) {
-        return State.X_Turn;
+    if (game.state == State.x_turn) {
+        return State.o_turn;
+    } else if (game.state == State.o_turn) {
+        return State.x_turn;
     }
 
     return game.state;
 }
 
 test "nextState" {
-    const x_turn_game = Game{ .state = State.X_Turn };
+    const x_turn_game = Game{ .state = State.x_turn };
 
-    assert(nextState(x_turn_game) == State.O_Turn);
+    assert(nextState(x_turn_game) == State.o_turn);
 }
