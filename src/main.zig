@@ -2,21 +2,20 @@
 /// Tic Tac Toe
 /// A simple tic tac toe CLI game.
 const std = @import("std");
-const game = @import("game.zig");
-const create = game.create;
-const view = game.view;
-const update = game.update;
-const complete = game.complete;
+const Game = @import("game.zig").Game;
 
 pub fn main() anyerror!void {
+    const allocator = std.heap.page_allocator;
     const stdout = std.io.getStdOut().writer();
     const stdin = std.io.getStdIn().reader();
 
-    var g = create();
+    var g = try Game.init(allocator);
+    defer g.deinit();
 
-    try view(g, stdout);
-    while (!complete(g)) {
-        g = try update(g, stdin);
-        try view(g, stdout);
-    }
+    try g.start(stdin, stdout);
+}
+
+test {
+    _ = @import("game.zig");
+    _ = @import("util.zig");
 }

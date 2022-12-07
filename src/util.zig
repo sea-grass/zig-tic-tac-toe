@@ -1,6 +1,4 @@
 const std = @import("std");
-const mem = std.mem;
-const assert = std.debug.assert;
 
 pub fn allEqual(comptime T: type, items: []const T) bool {
     // empty arrays technically don't have _different_ items
@@ -23,10 +21,10 @@ test "allEqual" {
     const empty_items = [_]u8{};
     const single_items = [_]u8{1};
 
-    assert(!allEqual(u8, different_items[0..]));
-    assert(allEqual(u8, same_items[0..]));
-    assert(allEqual(u8, empty_items[0..]));
-    assert(allEqual(u8, single_items[0..]));
+    try std.testing.expect(!allEqual(u8, different_items[0..]));
+    try std.testing.expect(allEqual(u8, same_items[0..]));
+    try std.testing.expect(allEqual(u8, empty_items[0..]));
+    try std.testing.expect(allEqual(u8, single_items[0..]));
 }
 
 pub fn any(comptime T: type, target: T, items: []const T) bool {
@@ -45,7 +43,18 @@ test "any" {
     const does_not_contain_target = [_]u8{ 2, 3, 4 };
     const empty = [_]u8{};
 
-    assert(any(u8, target, contains_target[0..]));
-    assert(!any(u8, target, does_not_contain_target[0..]));
-    assert(!any(u8, target, empty[0..]));
+    try std.testing.expect(any(u8, target, contains_target[0..]));
+    try std.testing.expect(!any(u8, target, does_not_contain_target[0..]));
+    try std.testing.expect(!any(u8, target, empty[0..]));
+}
+
+pub fn readLine(reader: anytype) ![]const u8 {
+    var buf: [20]u8 = undefined;
+
+    errdefer reader.skipUntilDelimiterOrEof('\n') catch {};
+    if (try reader.readUntilDelimiterOrEof(&buf, '\n')) |input| {
+        return std.mem.trimRight(u8, input, "\r");
+    }
+
+    return error.NoInput;
 }
