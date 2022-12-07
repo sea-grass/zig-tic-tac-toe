@@ -5,11 +5,13 @@ const allEqual = util.allEqual;
 const any = util.any;
 const readLine = util.readLine;
 
-pub const Command = union(enum) { unknown, quit, play: u8 };
-pub const GameError = error{
+const Command = union(enum) { unknown, quit, play: u8 };
+
+const GameError = error{
     InputError,
     ViewError,
 };
+
 const State = enum {
     x_turn,
     o_turn,
@@ -27,12 +29,87 @@ const State = enum {
             else => false,
         };
     }
+
+    pub fn format(state: @This(), comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+        _ = fmt;
+        _ = options;
+        switch (state) {
+            .x_turn => {
+                try writer.print("X, it's your turn.", .{});
+            },
+            .o_turn => {
+                try writer.print("O, it's your turn.", .{});
+            },
+            .x_win => {
+                try writer.print("The game's over. X wins!", .{});
+            },
+            .o_win => {
+                try writer.print("The game's over. O wins!", .{});
+            },
+            .tie => {
+                try writer.print("The game's over. It's a tie!", .{});
+            },
+            else => {},
+        }
+    }
 };
-const Symbol = enum { empty, x, o };
-const ViewMessage = enum { none, input_too_long, invalid_number, invalid_choice, spot_already_occupied, unknown_input_error };
+
+const Symbol = enum {
+    empty,
+    x,
+    o,
+
+    pub fn format(symbol: @This(), comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+        _ = fmt;
+        _ = options;
+        switch (symbol) {
+            .empty => {
+                try writer.print(" ", .{});
+            },
+            .x => {
+                try writer.print("X", .{});
+            },
+            .o => {
+                try writer.print("O", .{});
+            },
+        }
+    }
+};
+
+const ViewMessage = enum {
+    none,
+    input_too_long,
+    invalid_number,
+    invalid_choice,
+    spot_already_occupied,
+    unknown_input_error,
+
+    pub fn format(msg: @This(), comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
+        _ = fmt;
+        _ = options;
+
+        switch (msg) {
+            .none => {},
+            .input_too_long => {
+                try writer.print("! Input too long. Please try again.", .{});
+            },
+            .invalid_number => {
+                try writer.print("! Input was not a valid number. Please try again.", .{});
+            },
+            .invalid_choice => {
+                try writer.print("! Input was not a valid choice. Please try again.", .{});
+            },
+            .spot_already_occupied => {
+                try writer.print("! The selected spot has already been occupied. Please try again.", .{});
+            },
+            .unknown_input_error => {
+                try writer.print("! Unknown input error. Please try again.", .{});
+            },
+        }
+    }
+};
 
 pub const Game = struct {
-    id: u8 = 0,
     state: State = State.x_turn,
     board: [9]Symbol = [_]Symbol{Symbol.empty} ** 9,
     message: ViewMessage = .none,
@@ -54,15 +131,31 @@ pub const Game = struct {
     fn view(g: Game, writer: anytype) !void {
         try writer.print("Tic Tac Toe\n===========\n", .{});
         try viewBoard(g, writer);
-        try viewState(g, writer);
-        try viewMessage(g, writer);
+        try writer.print("{s}\n", .{g.state});
+        try writer.print("{s}\n", .{g.message});
     }
 
-    pub fn complete(g: Game) bool {
+    fn complete(g: Game) bool {
         return g.state.isGameOver();
     }
 
-    pub fn update(g: *Game, reader: anytype) !void {
+    test "complete" {
+        const x_turn_game = Game{ .state = State.x_turn };
+        const o_turn_game = Game{ .state = State.o_turn };
+        const x_win_game = Game{ .state = State.x_win };
+        const o_win_game = Game{ .state = State.o_win };
+        const tie_game = Game{ .state = State.tie };
+        const quit_game = Game{ .state = State.quit };
+
+        try std.testing.expect(!x_turn_game.complete());
+        try std.testing.expect(!o_turn_game.complete());
+        try std.testing.expect(x_win_game.complete());
+        try std.testing.expect(o_win_game.complete());
+        try std.testing.expect(tie_game.complete());
+        try std.testing.expect(quit_game.complete());
+    }
+
+    fn update(g: *Game, reader: anytype) !void {
         const command = try g.getCommand(reader);
 
         switch (command) {
@@ -90,6 +183,7 @@ pub const Game = struct {
             },
             .quit => {
                 g.state = State.quit;
+                g.message = .none;
                 return;
             },
             .unknown => {
@@ -109,19 +203,12 @@ pub const Game = struct {
             if (i % 3 == 0) {
                 try writer.print("-------------\n", .{});
             }
+
             try writer.print("|", .{});
 
-            switch (square) {
-                .empty => {
-                    try writer.print(" {} ", .{i});
-                },
-                .x => {
-                    try writer.print(" X ", .{});
-                },
-                .o => {
-                    try writer.print(" O ", .{});
-                },
-            }
+            if (square == .empty) {
+                try writer.print(" {d} ", .{i});
+            } else try writer.print(" {s} ", .{square});
 
             if (i % 3 == 2) {
                 try writer.print("|\n", .{});
@@ -129,50 +216,6 @@ pub const Game = struct {
         }
         // print bottom border
         try writer.print("-------------\n", .{});
-    }
-
-    fn viewState(g: Game, writer: anytype) !void {
-        switch (g.state) {
-            .x_turn => {
-                try writer.print("X, it's your turn.\n", .{});
-            },
-            .o_turn => {
-                try writer.print("O, it's your turn.\n", .{});
-            },
-            .x_win => {
-                try writer.print("The game's over. X wins!\n", .{});
-            },
-            .o_win => {
-                try writer.print("The game's over. O wins!\n", .{});
-            },
-            .tie => {
-                try writer.print("The game's over. It's a tie!\n", .{});
-            },
-            else => {},
-        }
-    }
-
-    fn viewMessage(g: Game, writer: anytype) !void {
-        switch (g.message) {
-            .none => {
-                try writer.print("\n", .{});
-            },
-            .input_too_long => {
-                try writer.print("! Input too long. Please try again.\n", .{});
-            },
-            .invalid_number => {
-                try writer.print("! Input was not a valid number. Please try again.\n", .{});
-            },
-            .invalid_choice => {
-                try writer.print("! Input was not a valid choice. Please try again.\n", .{});
-            },
-            .spot_already_occupied => {
-                try writer.print("! The selected spot has already been occupied. Please try again.\n", .{});
-            },
-            .unknown_input_error => {
-                try writer.print("! Unknown input error. Please try again.\n", .{});
-            },
-        }
     }
 
     fn getCommand(_: Game, reader: anytype) GameError!Command {
@@ -189,22 +232,6 @@ pub const Game = struct {
         return Command{ .play = guess };
     }
 };
-
-test "complete" {
-    const x_turn_game = Game{ .state = State.x_turn };
-    const o_turn_game = Game{ .state = State.o_turn };
-    const x_win_game = Game{ .state = State.x_win };
-    const o_win_game = Game{ .state = State.o_win };
-    const tie_game = Game{ .state = State.tie };
-    const quit_game = Game{ .state = State.quit };
-
-    try std.testing.expect(!x_turn_game.complete());
-    try std.testing.expect(!o_turn_game.complete());
-    try std.testing.expect(x_win_game.complete());
-    try std.testing.expect(o_win_game.complete());
-    try std.testing.expect(tie_game.complete());
-    try std.testing.expect(quit_game.complete());
-}
 
 const checks: [8][3]u8 = [8][3]u8{
     [3]u8{ 0, 1, 2 },
@@ -245,4 +272,8 @@ test "nextState" {
     const x_turn_game = Game{ .state = State.x_turn };
 
     try std.testing.expect(nextState(x_turn_game) == State.o_turn);
+}
+
+test {
+    std.testing.refAllDecls(@This());
 }
