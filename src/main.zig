@@ -2,7 +2,7 @@
 /// Tic Tac Toe
 /// A simple tic tac toe CLI game.
 const std = @import("std");
-const Game = @import("game.zig").Game;
+const Game = @import("Game.zig");
 
 pub fn main() anyerror!void {
     const allocator = std.heap.page_allocator;
@@ -16,6 +16,6 @@ pub fn main() anyerror!void {
 }
 
 test {
-    _ = @import("game.zig");
+    _ = @import("Game.zig");
     _ = @import("util.zig");
 }
