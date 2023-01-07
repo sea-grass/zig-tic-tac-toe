@@ -127,10 +127,14 @@ pub fn sub_frame(frame: *Frame, row: u8, col: u8) SubFrame {
 }
 
 pub fn update(frame: *Frame) ![]const u8 {
+    // todo: create buf and dirty once on frame init
     var buf: []u8 = try frame.allocator.alloc(u8, frame.width * frame.height);
     defer frame.allocator.free(buf);
-    // fill with spaces to avoid unknown data
     std.mem.set(u8, buf, frame.whitespace_char);
+    var dirty: []bool = try frame.allocator.alloc(bool, frame.width * frame.height);
+    defer frame.allocator.free(dirty);
+    std.mem.set(bool, dirty, false);
+    // fill with spaces to avoid unknown data
     var list = ArrayList(u8).init(frame.allocator);
     defer list.deinit();
 
@@ -140,15 +144,21 @@ pub fn update(frame: *Frame) ![]const u8 {
         var index: usize = start_index;
         std.debug.print("\nprocessing write({d}, {d}, {s})\n", .{ write.row, write.col, write.data });
         var curr: []const u8 = write.data[0..];
-        while (curr.len > 0) {
+        while (curr.len > 0 and index < buf.len) {
             switch (curr[0]) {
                 '\n' => {
-                    buf[index] = 0;
+                    if (!dirty[index]) {
+                        buf[index] = 0;
+                        dirty[index] = true;
+                    }
                     // todo: index should be negative offset by the current col
                     index += frame.width;
                 },
                 else => |c| {
-                    buf[index] = c;
+                    if (!dirty[index]) {
+                        buf[index] = c;
+                        dirty[index] = true;
+                    }
                     index += 1;
                 },
             }
@@ -209,16 +219,18 @@ const SubFrame = struct {
 };
 
 test {
-    const rows = 10;
-    const cols = 30;
+    const rows = 5;
+    const cols = 5;
     var frame = init(std.testing.allocator, cols, rows);
     frame.whitespace_char = '@';
     defer frame.deinit();
 
     {
-        const title_str = "Tic Tac Toe";
-        var title = frame.sub_frame(0, cols / 2 - title_str.len / 2).writer();
-        try title.print("{s}", .{title_str});
+        var title = frame.sub_frame(0, 1).writer();
+        try title.print("abc", .{});
+
+        var content_a = frame.sub_frame(0, 0).writer();
+        try content_a.print("Lorem ipsum dolor sit amet, some other text.\n", .{});
 
         var footer = frame.sub_frame(2, 0).writer();
         try footer.print("...", .{});
