@@ -70,16 +70,18 @@ const PriorityQueue = std.PriorityQueue;
 // A frame can be instructed to fill empty spaces with a whitespace character. By default, it will uses spaces if there are still
 // characters in the current row, otherwise will print a newline and skip rendering the unnecessary whitespace.
 
-width: u32,
-height: u32,
+width: u64,
+height: u64,
 allocator: Allocator,
 writes: WriteQueue,
+subframe_ptrs: ArrayList(*SubFrame),
 whitespace_char: u8 = ' ',
 
 const Frame = @This();
 const Write = struct {
-    row: u8,
-    col: u8,
+    row: u64,
+    col: u64,
+    offset: u64,
     data: []const u8,
 };
 
@@ -105,10 +107,11 @@ const WriteCompare = struct {
     }
 };
 
-pub fn init(a: Allocator, width: u8, height: u8) Frame {
+pub fn init(a: Allocator, width: u64, height: u64) Frame {
     return .{
         .allocator = a,
         .writes = WriteQueue.init(a, .{}),
+        .subframe_ptrs = ArrayList(*SubFrame).init(a),
         .width = width,
         .height = height,
     };
@@ -116,14 +119,21 @@ pub fn init(a: Allocator, width: u8, height: u8) Frame {
 
 pub fn deinit(frame: *Frame) void {
     frame.writes.deinit();
+    for (frame.subframe_ptrs.items) |sf| {
+        frame.allocator.destroy(sf);
+    }
+    frame.subframe_ptrs.deinit();
 }
 
-pub fn sub_frame(frame: *Frame, row: u8, col: u8) SubFrame {
-    return .{
+pub fn sub_frame(frame: *Frame, row: u64, col: u64) *SubFrame {
+    var ptr = frame.allocator.create(SubFrame) catch unreachable;
+    frame.subframe_ptrs.append(ptr) catch unreachable;
+    ptr.* = .{
         .frame = frame,
         .row = row,
         .col = col,
     };
+    return ptr;
 }
 
 pub fn update(frame: *Frame) ![]const u8 {
@@ -136,7 +146,7 @@ pub fn update(frame: *Frame) ![]const u8 {
 
     // Write to fixed size buffer
     while (frame.writes.removeOrNull()) |write| {
-        var start_index: usize = frame.width * write.row + write.col;
+        var start_index: usize = frame.width * write.row + write.col + write.offset;
         var index: usize = start_index;
         std.debug.print("\nprocessing write({d}, {d}, {s})\n", .{ write.row, write.col, write.data });
         var curr: []const u8 = write.data[0..];
@@ -187,23 +197,26 @@ pub fn update(frame: *Frame) ![]const u8 {
 }
 
 const SubFrame = struct {
-    row: u8,
-    col: u8,
+    row: u64,
+    col: u64,
+    offset: u64 = 0,
     frame: *Frame,
 
     pub const WriteError = error{CouldNotWrite};
-    pub const Writer = io.Writer(SubFrame, WriteError, write);
+    pub const Writer = io.Writer(*SubFrame, WriteError, write);
 
-    pub fn writer(self: SubFrame) Writer {
+    pub fn writer(self: *SubFrame) Writer {
         return .{ .context = self };
     }
 
-    fn write(self: SubFrame, bytes: []const u8) WriteError!usize {
+    fn write(self: *SubFrame, bytes: []const u8) WriteError!usize {
         self.frame.writes.add(.{
             .row = self.row,
             .col = self.col,
+            .offset = self.offset,
             .data = bytes,
         }) catch return WriteError.CouldNotWrite;
+        self.offset = bytes.len;
         return bytes.len;
     }
 };
@@ -225,6 +238,7 @@ test {
 
         var smiley = frame.sub_frame(1, 1).writer();
         try smiley.print(":)", .{});
+        try smiley.print(" :(", .{});
     }
 
     const data = try frame.update();
