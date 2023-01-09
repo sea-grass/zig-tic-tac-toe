@@ -76,6 +76,7 @@ allocator: Allocator,
 writes: WriteQueue,
 subframe_ptrs: ArrayList(*SubFrame),
 whitespace_char: u8 = ' ',
+buffer: []u8,
 
 const Frame = @This();
 const Write = struct {
@@ -101,19 +102,23 @@ const WriteCompare = struct {
     fn compareReverse(self: @This(), a: Write, b: Write) math.Order {
         return switch (self.compare(a, b)) {
             .lt => .gt,
-            .gt => .lt,
             .eq => .eq,
+            .gt => .lt,
         };
     }
 };
 
 pub fn init(a: Allocator, width: u64, height: u64) Frame {
+    // TODO init becomes create with this first alloc
+    // Maybe move this back to update and init if not initialized
+    var buf: []u8 = a.alloc(u8, width * height) catch unreachable;
     return .{
         .allocator = a,
         .writes = WriteQueue.init(a, .{}),
         .subframe_ptrs = ArrayList(*SubFrame).init(a),
         .width = width,
         .height = height,
+        .buffer = buf,
     };
 }
 
@@ -123,6 +128,7 @@ pub fn deinit(frame: *Frame) void {
         frame.allocator.destroy(sf);
     }
     frame.subframe_ptrs.deinit();
+    frame.allocator.free(frame.buffer);
 }
 
 pub fn sub_frame(frame: *Frame, row: u64, col: u64) *SubFrame {
@@ -137,8 +143,7 @@ pub fn sub_frame(frame: *Frame, row: u64, col: u64) *SubFrame {
 }
 
 pub fn update(frame: *Frame) ![]const u8 {
-    var buf: []u8 = try frame.allocator.alloc(u8, frame.width * frame.height);
-    defer frame.allocator.free(buf);
+    var buf: []u8 = frame.buffer;
     // fill with spaces to avoid unknown data
     std.mem.set(u8, buf, frame.whitespace_char);
     var list = ArrayList(u8).init(frame.allocator);
