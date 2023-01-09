@@ -86,10 +86,10 @@ const Write = struct {
     data: []const u8,
 };
 
-const WriteQueue = PriorityQueue(Write, WriteCompare, WriteCompare.compareReverse);
+const WriteQueue = PriorityQueue(*Write, WriteCompare, WriteCompare.compareReverse);
 
 const WriteCompare = struct {
-    fn compare(_: @This(), a: Write, b: Write) math.Order {
+    fn compare(_: @This(), a: *Write, b: *Write) math.Order {
         if (a.row < b.row) return .lt;
         if (a.row == b.row) {
             if (a.col < b.col) return .lt;
@@ -99,7 +99,7 @@ const WriteCompare = struct {
         return .gt;
     }
 
-    fn compareReverse(self: @This(), a: Write, b: Write) math.Order {
+    fn compareReverse(self: @This(), a: *Write, b: *Write) math.Order {
         return switch (self.compare(a, b)) {
             .lt => .gt,
             .eq => .eq,
@@ -124,10 +124,12 @@ pub fn init(a: Allocator, width: u64, height: u64) Frame {
 
 pub fn deinit(frame: *Frame) void {
     frame.writes.deinit();
+
     for (frame.subframe_ptrs.items) |sf| {
         frame.allocator.destroy(sf);
     }
     frame.subframe_ptrs.deinit();
+
     frame.allocator.free(frame.buffer);
 }
 
@@ -151,9 +153,18 @@ pub fn update(frame: *Frame) ![]const u8 {
 
     // Write to fixed size buffer
     while (frame.writes.removeOrNull()) |write| {
+        defer {
+            frame.allocator.free(write.data);
+            frame.allocator.destroy(write);
+        }
+
         var start_index: usize = frame.width * write.row + write.col + write.offset;
         var index: usize = start_index;
-        std.debug.print("\nprocessing write({d}, {d}, {s})\n", .{ write.row, write.col, write.data });
+        const DEBUG = write.row == 4 and write.col == 0;
+        if (DEBUG) {
+            std.debug.print("\nprocessing write({d}, {d}, {s})\n", .{ write.row, write.col, write.data });
+        }
+
         var curr: []const u8 = write.data[0..];
         while (curr.len > 0) {
             switch (curr[0]) {
@@ -207,7 +218,7 @@ const SubFrame = struct {
     offset: u64 = 0,
     frame: *Frame,
 
-    pub const WriteError = error{CouldNotWrite};
+    pub const WriteError = error{ CouldNotCopyBytes, CouldNotWrite };
     pub const Writer = io.Writer(*SubFrame, WriteError, write);
 
     pub fn writer(self: *SubFrame) Writer {
@@ -215,13 +226,30 @@ const SubFrame = struct {
     }
 
     fn write(self: *SubFrame, bytes: []const u8) WriteError!usize {
-        self.frame.writes.add(.{
+        const DEBUG = self.row == 4 and self.col == 0;
+        if (DEBUG) {
+            std.debug.print("queueing write {s} at offset ({d})\n", .{ bytes, self.offset });
+            //if (self.frame.writes.items.len > 0)
+            //    std.debug.print("last write was {d}\n", .{self.frame.writes.items[self.frame.writes.items.len - 1].offset});
+        }
+
+        var data = ArrayList(u8).init(self.frame.allocator);
+        defer data.deinit();
+        data.appendSlice(bytes) catch return WriteError.CouldNotCopyBytes;
+
+        var ptr = self.frame.allocator.create(Write) catch return WriteError.CouldNotCopyBytes;
+        errdefer self.frame.allocator.destroy(ptr);
+
+        ptr.* = .{
             .row = self.row,
             .col = self.col,
             .offset = self.offset,
-            .data = bytes,
-        }) catch return WriteError.CouldNotWrite;
-        self.offset = bytes.len;
+            .data = data.toOwnedSlice() catch return WriteError.CouldNotCopyBytes,
+        };
+
+        self.frame.writes.add(ptr) catch return WriteError.CouldNotWrite;
+
+        self.offset += bytes.len;
         return bytes.len;
     }
 };
@@ -244,6 +272,15 @@ test {
         var smiley = frame.sub_frame(1, 1).writer();
         try smiley.print(":)", .{});
         try smiley.print(" :(", .{});
+
+        var numbers = frame.sub_frame(4, 0).writer();
+        const nums = .{ 1, 2, 3, 4 };
+        inline for (nums) |num| {
+            try numbers.print("{d}, ", .{num});
+        }
+
+        var numbers2 = frame.sub_frame(5, 0).writer();
+        try numbers2.print("1, ", .{});
     }
 
     const data = try frame.update();
