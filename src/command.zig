@@ -1,6 +1,5 @@
 const std = @import("std");
-const util = @import("util.zig");
-const readLine = util.readLine;
+const readLine = @import("read_line.zig").readLine;
 
 pub const Command = union(enum) { unknown, quit, play: u8 };
 pub const Error = error{InputError};

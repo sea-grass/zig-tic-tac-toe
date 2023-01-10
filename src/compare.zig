@@ -47,14 +47,3 @@ test "any" {
     try std.testing.expect(!any(u8, target, does_not_contain_target[0..]));
     try std.testing.expect(!any(u8, target, empty[0..]));
 }
-
-pub fn readLine(reader: anytype) ![]const u8 {
-    var buf: [20]u8 = undefined;
-
-    errdefer reader.skipUntilDelimiterOrEof('\n') catch {};
-    if (try reader.readUntilDelimiterOrEof(&buf, '\n')) |input| {
-        return std.mem.trimRight(u8, input, "\r");
-    }
-
-    return error.NoInput;
-}

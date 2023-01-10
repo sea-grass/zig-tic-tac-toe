@@ -160,31 +160,24 @@ pub fn update(frame: *Frame) ![]const u8 {
             frame.allocator.destroy(write);
         }
 
+        // todo: compute start offset then use row and col
+        // to write to buf, since the next part uses row
+        // and col to read from buf
         var start_index: usize = frame.width * write.row + write.col + write.offset;
         var index: usize = start_index;
 
         var curr: []const u8 = write.data[0..];
         while (curr.len > 0) {
             if (index >= buf.len) continue :writes;
-            switch (curr[0]) {
-                '\n' => {
-                    if (!dirty[index]) {
-                        buf[index] = 0;
-                        dirty[index] = true;
-                    }
-                    // todo: index should be negative offset by the current col
-                    index += frame.width;
-                },
-                else => |c| {
-                    if (!dirty[index]) {
-                        buf[index] = 0;
-                        dirty[index] = true;
-                    }
-                    buf[index] = c;
-                    index += 1;
-                },
+            if (!dirty[index]) {
+                switch (curr[0]) {
+                    '\n' => buf[index] = 0,
+                    else => |c| buf[index] = c,
+                }
+
+                index += 1;
+                curr = curr[1..];
             }
-            curr = curr[1..];
         }
     }
 
@@ -315,6 +308,25 @@ test "overwrite" {
     const data = try f.update();
     defer std.testing.allocator.free(data);
 
-    std.debug.print("\ndata\n{s}\n", .{data});
-    try std.testing.expect(std.mem.eql(u8, data, "gl\nhf\n"));
+    try expectEql(u8, "gl\nhf\n", data);
+}
+
+test "newline" {
+    const a = std.testing.allocator;
+    var f = Frame.init(a, 2, 2);
+    defer f.deinit();
+
+    try f.sub_frame(0, 0).writer().print("ab\ncd", .{});
+
+    const data = try f.update();
+    defer std.testing.allocator.free(data);
+
+    try expectEql(u8, "ab\ncd\n", data);
+}
+
+fn expectEql(comptime T: type, expected: []const T, actual: []const T) !void {
+    std.testing.expect(std.mem.eql(T, expected, actual)) catch {
+        std.debug.print("FAIL expectEql(expected({s}), actual({s}))\n", .{ expected, actual });
+        return error.TestFailure;
+    };
 }

@@ -1,12 +1,13 @@
 const std = @import("std");
-const util = @import("util.zig");
 const command = @import("command.zig");
+const compare = @import("compare.zig");
+const Frame = @import("Frame.zig");
 const Move = @import("Move.zig");
 const State = @import("state.zig").State;
 const Symbol = @import("symbol.zig").Symbol;
 const Allocator = std.mem.Allocator;
-const allEqual = util.allEqual;
-const any = util.any;
+const allEqual = compare.allEqual;
+const any = compare.any;
 const ArrayList = std.ArrayList;
 const Command = command.Command;
 
@@ -22,16 +23,23 @@ allocator: Allocator,
 board: [9]Symbol = [_]Symbol{Symbol.empty} ** 9,
 message: ViewMessage = .none,
 moves: ArrayList(Move),
+view_frame: Frame,
 
 pub fn init(a: Allocator) !Game {
+    const rows = 20;
+    const cols = 40;
+    var frame = Frame.init(a, cols, rows);
+    frame.whitespace_char = 'v';
     return .{
         .allocator = a,
         .moves = ArrayList(Move).init(a),
+        .view_frame = frame,
     };
 }
 
 pub fn deinit(self: *Game) void {
     self.moves.deinit();
+    self.view_frame.deinit();
 }
 
 pub fn start(g: *Game, reader: anytype, writer: anytype) !void {
@@ -42,16 +50,29 @@ pub fn start(g: *Game, reader: anytype, writer: anytype) !void {
     }
 }
 
-fn view(g: Game, writer: anytype) !void {
-    try writer.print("\n{u} Tic Tac Toe {u}\n\n", .{ Symbol.x.unicode_char(), Symbol.o.unicode_char() });
-    try g.viewBoard(writer);
-    try g.viewMoves(writer);
-    try g.viewState(writer);
-    try g.viewMessage(writer);
+fn view(g: *Game, writer: anytype) !void {
+    var title = g.view_frame.sub_frame(0, 2).writer();
+    try title.print("{c} Tic Tac Toe {c}", .{ Symbol.x.char(), Symbol.o.char() });
+
+    var board = g.view_frame.sub_frame(1, 0).writer();
+    try g.viewBoard(board);
+
+    var moves = g.view_frame.sub_frame(10, 0).writer();
+    try g.viewMoves(moves);
+
+    try g.viewState(g.view_frame.sub_frame(9, 2).writer());
+
+    try g.viewMessage(g.view_frame.sub_frame(11, 0).writer());
     if (!g.complete()) {
-        try g.viewRemainingSpots(writer);
-        try g.viewPrompt(writer);
+        try g.viewRemainingSpots(g.view_frame.sub_frame(12, 0).writer());
     }
+
+    const frame = try g.view_frame.update();
+    // TODO Frame frees its own at the end of its  lifetime
+    defer g.view_frame.allocator.free(frame);
+
+    try writer.print("\n{s}", .{frame});
+    if (!g.complete()) try g.viewPrompt(writer);
 }
 
 fn complete(g: Game) bool {
@@ -132,10 +153,10 @@ const win_checks = [8][3]u8{
 fn viewState(g: Game, writer: anytype) !void {
     switch (g.state) {
         .x_turn, .o_turn => {
-            try writer.print("{u}, it's your turn.", .{g.state.symbol().unicode_char()});
+            try writer.print("{c}, it's your turn.", .{g.state.symbol().char()});
         },
         .x_win, .o_win => {
-            try writer.print("The game's over. {u} wins!", .{g.state.symbol().unicode_char()});
+            try writer.print("The game's over. {c} wins!", .{g.state.symbol().char()});
         },
         .tie => {
             try writer.print("The game's over. It's a tie!", .{});
@@ -186,27 +207,18 @@ fn viewRemainingSpots(g: Game, writer: anytype) !void {
 }
 
 fn viewPrompt(g: Game, writer: anytype) !void {
-    try writer.print("{u} ", .{g.state.symbol().unicode_char()});
+    try writer.print("{c} ", .{g.state.symbol().char()});
 }
 
 fn viewBoard(g: Game, writer: anytype) !void {
     for (g.board) |square, i| {
-        if (i % 3 == 0) {
-            try writer.print("\n", .{});
-        }
-
-        try writer.print(" ", .{});
-
         if (square == .empty) {
             try writer.print(" {d} ", .{i});
         } else try writer.print(" {s} ", .{square});
-
-        if (i % 3 == 2) {
-            try writer.print(" \n", .{});
+        if ((i + 1) % 3 == 0) {
+            try writer.print("\n", .{});
         }
     }
-    // print bottom border
-    try writer.print("\n", .{});
 }
 
 fn viewMoves(game: Game, writer: anytype) !void {
@@ -214,7 +226,7 @@ fn viewMoves(game: Game, writer: anytype) !void {
 
     try writer.print("Moves: ", .{});
     for (game.moves.items) |m| {
-        try writer.print("{u}{d} ", .{ m.symbol.unicode_char(), m.spot });
+        try writer.print("{c}{d} ", .{ m.symbol.char(), m.spot });
     }
     try writer.print("\n", .{});
 }

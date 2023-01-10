@@ -7,6 +7,14 @@ pub const Symbol = enum {
 
     const Self = @This();
 
+    pub inline fn char(symbol: Self) u8 {
+        return switch (symbol) {
+            .empty => ' ',
+            .x => 'x',
+            .o => 'o',
+        };
+    }
+
     pub inline fn unicode_char(symbol: Self) u16 {
         return switch (symbol) {
             .empty => ' ',
@@ -20,6 +28,6 @@ pub const Symbol = enum {
     pub fn format(symbol: Self, comptime fmt: []const u8, options: std.fmt.FormatOptions, writer: anytype) !void {
         _ = fmt;
         _ = options;
-        try writer.print("{u}", .{symbol.unicode_char()});
+        try writer.print("{c}", .{symbol.char()});
     }
 };

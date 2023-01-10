@@ -14,8 +14,3 @@ pub fn main() anyerror!void {
 
     try g.start(stdin, stdout);
 }
-
-test {
-    _ = @import("Game.zig");
-    _ = @import("util.zig");
-}
